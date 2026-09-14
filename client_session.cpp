@@ -83,6 +83,7 @@ void ClientSession::DrawGUI(void* ws) {
 
 void ClientSession::DrawGuiFull(void* ws) {
     ImGui::SetCurrentContext(imguiContext);
+    ImPlot::SetCurrentContext(implotContext);
     ImGui::NewFrame();
     DrawGUI(ws);
     ImGui::Render();
