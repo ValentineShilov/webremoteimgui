@@ -22,7 +22,7 @@ using json = nlohmann::json;
 
 int main() {
     GlobalState global_state;
-    ImServer server(8080, "0.0.0.0", "ws://127.0.0.1:8080/ws", "/", "index.html", &global_state);
+    ImServer server(8080, "0.0.0.0", "/ws", "/", "index.html", &global_state);
     server.run_server();
     return 0;
 }
