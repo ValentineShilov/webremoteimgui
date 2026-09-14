@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<!-- Remote ImGui Renderer by ValentineS  https://github.com/valentineshilov 
+	 Alows writing web apps in C++ with code executed on server
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Remote ImGui Web Renderer</title>
+    <style>
+        body, html { margin: 0; padding: 0; overflow: hidden; background: #1a1a1a; width: 100%; height: 100%; }
+        canvas { display: block; width: 100%; height: 100%; user-select: none; touch-action: none; }
+    </style>
+</head>
+<body>
+	<div id="error-block" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); z-index: 9999; flex-direction: column; justify-content: center; align-items: center; font-family: sans-serif;">
+		<p id="error-message" style="color: #ff5555; font-size: 18px; font-weight: bold; margin-bottom: 15px;">Connection error</p>
+		<button onclick="location.reload()" style="padding: 10px 20px; font-size: 16px; cursor: pointer; background: #fff; border: none; border-radius: 4px; font-weight: bold;">Reload</button>
+	</div>
+	
+	<div id="error-block-webgl-unsupported" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.85); z-index: 9999; flex-direction: column; justify-content: center; align-items: center; font-family: sans-serif;">
+		<p id="error-message-webgl-unsupported" style="color: #ff5555; font-size: 18px; font-weight: bold; margin-bottom: 15px;">WebGL not supported</p>
+		<button onclick="location.reload()" style="padding: 10px 20px; font-size: 16px; cursor: pointer; background: #fff; border: none; border-radius: 4px; font-weight: bold;">Reload</button>
+	</div>
+	
+    <canvas id="imgui-canvas"></canvas>
+	<input type="file" id="file-selector" style="display: none;">
+    <script>
+        const canvas = document.getElementById("imgui-canvas");
+        const gl = canvas.getContext("webgl", { alpha: false, antialias: true });
+        
+        if (!gl) { 
+			const webgl_errorBlock = document.getElementById("error-block-webgl-unsupported");
+			webgl_errorBlock.style.display = "block";
+		}
+        gl.enable(gl.SCISSOR_TEST);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+		gl.getExtension("OES_element_index_uint");
+		const fileSelector = document.getElementById("file-selector");
+		let backspaceTimer = null;
+		let isHolding = false;
+
+        // ImGui WebGL shaders
+        const vsSource = `
+            attribute vec2 aPos;
+            attribute vec2 aUV;
+            attribute vec4 aColor;
+            uniform vec2 uDisplaySize;
+            varying vec2 vUV;
+            varying vec4 vColor;
+            void main() {
+                vUV = aUV;
+                vColor = aColor;
+                gl_Position = vec4(aPos.x / uDisplaySize.x * 2.0 - 1.0, 1.0 - aPos.y / uDisplaySize.y * 2.0, 0.0, 1.0);
+            }
+        `;
+        const fsSource = `
+            precision mediump float;
+            uniform sampler2D uTexture;
+            varying vec2 vUV;
+            varying vec4 vColor;
+            void main() {
+                gl_FragColor = vColor * texture2D(uTexture, vUV);
+            }
+        `;
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            return shader;
+        }
+        const program = gl.createProgram();
+        gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        const attribs = {
+            pos: gl.getAttribLocation(program, "aPos"),
+            uv: gl.getAttribLocation(program, "aUV"),
+            color: gl.getAttribLocation(program, "aColor")
+        };
+        const uniforms = {
+            displaySize: gl.getUniformLocation(program, "uDisplaySize"),
+            texture: gl.getUniformLocation(program, "uTexture")
+        };
+
+        const glVertexBuffer = gl.createBuffer();
+        const glIndexBuffer = gl.createBuffer();
+        const textures = {};
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: "resize", w: canvas.width, h: canvas.height }));
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        // Open websocket
+        const socket = new WebSocket("ws://localhost:8080");
+        socket.binaryType = "arraybuffer";
+
+        socket.onopen = () => { resizeCanvas(); };
+
+		const errorBlock = document.getElementById("error-block");
+		function showError() {
+			errorBlock.style.display = "block";
+		}
+		
+		socket.onerror = (error) => {
+			console.error("Websocket error:", error);
+			showError();
+		};
+
+		socket.onclose = (event) => {
+			if (!event.wasClean) {
+				console.warn("Conection closed with error");
+			}
+			else{
+				console.warn("Conection closed");
+			}
+			showError();
+		};
+
+
+        let clientFrameBuffer = new Uint8Array(0);
+        let textToCopyNext = ""; 
+
+        // Render function
+        function renderImGuiFrame(rawBuffer) {
+            const renderView = new DataView(rawBuffer);
+            const totalVtxCount = renderView.getUint32(0, true);
+            const totalIdxCount = renderView.getUint32(4, true);
+            const totalCmdCount = renderView.getUint32(8, true);
+            const idxTypeSize = renderView.getUint32(12, true); // Index size form server
+            
+            let offset = 16; // 16 byte header
+            const VTX_SIZE = 20;
+
+            const vtxByteLength = totalVtxCount * VTX_SIZE;
+            const vtxRawBuffer = rawBuffer.slice(offset, offset + vtxByteLength);
+            const vtxArray = new Float32Array(vtxRawBuffer);
+            offset += vtxByteLength;
+
+            const idxByteLength = totalIdxCount * idxTypeSize;
+            const idxRawBuffer = rawBuffer.slice(offset, offset + idxByteLength);
+            
+            // Dynamically choose index type (16-bit or 32-bit)
+            let idxArray;
+            let glIndexType;
+            if (idxTypeSize === 4) {
+                idxArray = new Uint32Array(idxRawBuffer);
+                glIndexType = gl.UNSIGNED_INT;
+            } else {
+                idxArray = new Uint16Array(idxRawBuffer);
+                glIndexType = gl.UNSIGNED_SHORT;
+            }
+            offset += idxByteLength;
+
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.uniform2f(uniforms.displaySize, canvas.width, canvas.height);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, glVertexBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, vtxArray, gl.STREAM_DRAW);
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glIndexBuffer);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idxArray, gl.STREAM_DRAW);
+
+            gl.enableVertexAttribArray(attribs.pos);
+            gl.vertexAttribPointer(attribs.pos, 2, gl.FLOAT, false, VTX_SIZE, 0);
+            gl.enableVertexAttribArray(attribs.uv);
+            gl.vertexAttribPointer(attribs.uv, 2, gl.FLOAT, false, VTX_SIZE, 8);
+            gl.enableVertexAttribArray(attribs.color);
+            gl.vertexAttribPointer(attribs.color, 4, gl.UNSIGNED_BYTE, true, VTX_SIZE, 16);
+
+            let idxOffset = 0;
+            for (let i = 0; i < totalCmdCount; i++) {
+                const elemCount = renderView.getUint32(offset, true);
+                const clipX = renderView.getFloat32(offset + 4, true);
+                const clipY = renderView.getFloat32(offset + 8, true);
+                const clipZ = renderView.getFloat32(offset + 12, true);
+                const clipW = renderView.getFloat32(offset + 16, true);
+                const textureId = renderView.getUint32(offset + 20, true);
+                offset += 24;
+
+                gl.scissor(clipX, canvas.height - clipW, clipZ - clipX, clipW - clipY);
+
+                const currentTexture = textures[textureId];
+                if (currentTexture) {
+                    gl.bindTexture(gl.TEXTURE_2D, currentTexture);
+                } else {
+                    gl.bindTexture(gl.TEXTURE_2D, null);
+                }
+
+                // use dynamic (glIndexType), size multiplied (idxTypeSize)
+                gl.drawElements(gl.TRIANGLES, elemCount, glIndexType, idxOffset * idxTypeSize);
+                idxOffset += elemCount;
+            }
+        }
+
+
+        // Mouse/touch pos
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return { x: clientX - rect.left, y: clientY - rect.top };
+        }
+
+        // Mouse event handler on window
+        window.addEventListener("mousemove", (e) => {
+            if (socket.readyState === WebSocket.OPEN) {
+                const pos = getPos(e);
+                socket.send(JSON.stringify({ type: "mousemove", source: "mouse", x: pos.x, y: pos.y }));
+            }
+        });
+
+        canvas.addEventListener("mousedown", (e) => {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: "mousedown", button: e.button }));
+            }
+        });
+
+        window.addEventListener("mouseup", (e) => {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: "mouseup", button: e.button }));
+            }
+        });
+
+        // touch input for mobile devices
+        canvas.addEventListener("touchstart", (e) => {
+            if (socket.readyState === WebSocket.OPEN && e.touches.length > 0) {
+                const pos = getPos(e);
+                socket.send(JSON.stringify({ type: "mousemove", source: "touch", x: pos.x, y: pos.y }));
+                socket.send(JSON.stringify({ type: "mousedown", button: 0 }));
+            }
+        });
+
+        canvas.addEventListener("touchmove", (e) => {
+            if (socket.readyState === WebSocket.OPEN && e.touches.length > 0) {
+                const pos = getPos(e);
+                socket.send(JSON.stringify({ type: "mousemove", source: "touch", x: pos.x, y: pos.y }));
+            }
+        });
+
+        canvas.addEventListener("touchend", (e) => {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: "mouseup", button: 0 }));
+            }
+        });
+
+        // Mouse scroll
+        window.addEventListener("wheel", (e) => {
+            if (socket.readyState === WebSocket.OPEN) {
+                const wheelY = -e.deltaY / 100;
+                const wheelX = e.deltaX / 100;
+                socket.send(JSON.stringify({ type: "wheel", x: wheelX, y: wheelY }));
+            }
+        }, { passive: false });
+        // Single backspace press
+        function sendBackspace() {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: "keydown", keyStr: "Backspace" }));
+                socket.send(JSON.stringify({ type: "keyup", keyStr: "Backspace" }));
+            }
+        }
+
+        // Keyboard input of special keys and text
+		window.addEventListener("keydown", (e) => {
+			if (socket.readyState !== WebSocket.OPEN) return;
+
+			if (["Space", "Backspace", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) {
+				e.preventDefault();
+			}
+			//backspace holding fix
+			if (e.code === "Backspace") {
+				if (!isHolding) {
+					isHolding = true;
+					
+					// send first backspace press
+					socket.send(JSON.stringify({ type: "keydown", keyStr: "Backspace" }));
+					socket.send(JSON.stringify({ type: "keyup", keyStr: "Backspace" }));
+
+					// Send backspace presses every 50ms while it's holded
+					backspaceTimer = setInterval(() => {
+						if (isHolding) {
+							socket.send(JSON.stringify({ type: "keydown", keyStr: "Backspace" }));
+							socket.send(JSON.stringify({ type: "keyup", keyStr: "Backspace" }));
+						}
+					}, 50); 
+				}
+				return;
+			}
+
+			// for other keys send normally
+			socket.send(JSON.stringify({ type: "keydown", keyStr: e.code }));
+			if (e.key.length === 1) {
+				socket.send(JSON.stringify({ type: "text", charStr: e.key }));
+			}
+		});
+
+		window.addEventListener("keyup", (e) => {
+			if (socket.readyState === WebSocket.OPEN && e.code === "Backspace") {
+				isHolding = false;
+				if (backspaceTimer) {
+					clearInterval(backspaceTimer);
+					backspaceTimer = null;
+				}
+				return;
+			}
+			if (socket.readyState === WebSocket.OPEN) {
+				socket.send(JSON.stringify({ type: "keyup", keyStr: e.code }));
+			}
+		});
+
+        // (Ctrl+V)
+        window.addEventListener("paste", async (e) => {
+            if (socket.readyState !== WebSocket.OPEN) return;
+            let text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+            if (!text && navigator.clipboard) { text = await navigator.clipboard.readText(); }
+            if (text) {
+                socket.send(JSON.stringify({ type: "clipboard_paste", text: text }));
+            }
+        });
+
+        // (Ctrl+C) fallback
+        window.addEventListener("keyup", (e) => {
+            if (e.code === "KeyC" && textToCopyNext) {
+                navigator.clipboard.writeText(textToCopyNext);
+                textToCopyNext = "";
+            }
+        });
+
+        // Drag and drop file upload
+        window.addEventListener("dragover", (e) => e.preventDefault());
+        window.addEventListener("drop", (e) => {
+            e.preventDefault();
+            const files = e.dataTransfer.files;
+            if (files.length > 0 && socket.readyState === WebSocket.OPEN) {
+                const file = files[0];
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    const arrayBuffer = event.target.result;
+                    const base64String = btoa(
+                        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
+                    );
+                    socket.send(JSON.stringify({
+                        type: "file_upload",
+                        filename: file.name,
+                        data: base64String
+                    }));
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        });
+
+        // Special commands from server handlers
+        socket.onmessage = (event) => {
+            // Text JSON data
+            if (typeof event.data === "string") {
+                try {
+                    const cmd = JSON.parse(event.data);
+					if (cmd.type === "set_cookie") {
+						document.cookie = cmd.cookie
+                        //window.open(cmd.url, "_blank");
+                    } 
+                    else if (cmd.type === "open_url") {
+                        window.open(cmd.url, "_blank");
+                    } 
+                    // Fopen dialog
+                    else if (cmd.type === "trigger_file_dialog") {
+                        fileSelector.click(); 
+                    }
+					// Copy to clipboard
+                    else if (cmd.type === "clipboard_copy") {
+                        textToCopyNext = cmd.text;
+                        if (navigator.clipboard) { navigator.clipboard.writeText(textToCopyNext).catch(() => {}); }
+                    }
+                } catch(e) {}
+                return;
+            }
+            // Binary data
+            const buffer = event.data;
+            const view = new DataView(buffer);
+            const packetType = view.getUint32(0, true);
+
+            // packet type 1: font textures
+            if (packetType === 1) { 
+                const width = view.getUint32(4, true);
+                const height = view.getUint32(8, true);
+                const rgbaData = new Uint8Array(buffer, 12, width * height * 4);
+
+                const tex = gl.createTexture();
+                gl.bindTexture(gl.TEXTURE_2D, tex);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgbaData);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                textures[1] = tex; 
+            } 
+            // packet type 2: full frame
+            else if (packetType === 2) {
+                const rawData = new Uint8Array(buffer, 4); 
+                clientFrameBuffer = new Uint8Array(rawData);
+                renderImGuiFrame(clientFrameBuffer.buffer);
+            }
+            // packet type 3: delta frame
+            else if (packetType === 3) { 
+                const targetSize = view.getUint32(4, true); 
+                if (clientFrameBuffer.byteLength === 0) return;
+
+                const newFrameBuffer = new Uint8Array(targetSize);
+                
+                const srcArray = new Uint8Array(buffer); 
+                
+                let srcOffset = 8; 
+                let dstOffset = 0;
+
+                while (srcOffset < buffer.byteLength) {
+                    const blockType = srcArray[srcOffset];
+                    srcOffset += 1;
+
+                    if (blockType === 0x01) { 
+                        const matchLen = view.getUint32(srcOffset, true);
+                        srcOffset += 4;
+                        
+                        const oldSlice = clientFrameBuffer.subarray(dstOffset, dstOffset + matchLen);
+                        newFrameBuffer.set(oldSlice, dstOffset);
+                        dstOffset += matchLen;
+                    } 
+                    else if (blockType === 0x02) { 
+                        const diffLen = view.getUint32(srcOffset, true);
+                        srcOffset += 4;
+                        
+                        // ИСПРАВЛЕНО: Безопасно копируем кусок данных напрямую из srcArray без создания новых буферов
+                        const diffSlice = srcArray.subarray(srcOffset, srcOffset + diffLen);
+                        newFrameBuffer.set(diffSlice, dstOffset);
+                        
+                        srcOffset += diffLen;
+                        dstOffset += diffLen;
+                    }
+                    else if (blockType === 0xFF) { 
+                        const remaining = view.getUint32(srcOffset, true);
+                        srcOffset += 4;
+                        
+                        const remainingSlice = srcArray.subarray(srcOffset, srcOffset + remaining);
+                        newFrameBuffer.set(remainingSlice, dstOffset);
+                        break;
+                    }
+                }
+
+                clientFrameBuffer = newFrameBuffer;
+                renderImGuiFrame(clientFrameBuffer.buffer);
+            }
+            // packet type 4: file download from server
+            else if (packetType === 4) {
+                const name_len = view.getUint32(4, true);
+                const nameBytes = new Uint8Array(buffer, 8, name_len);
+                const filename = new TextDecoder("utf-8").decode(nameBytes);
+                const fileData = buffer.slice(8 + name_len);
+                
+                const blob = new Blob([fileData], { type: "application/octet-stream" });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                a.remove();
+                console.log(`File ${filename} downloaded successfully`);
+            }
+			// packet type 6: dynamic texture/image from server
+           else if (packetType === 6) {
+                const textureId = view.getUint32(4, true);
+                const width = view.getUint32(8, true);
+                const height = view.getUint32(12, true);
+                const rgbaData = new Uint8Array(buffer, 16, width * height * 4);
+
+                // if texture already exists
+                let tex = textures[textureId];
+                if (!tex) {
+                    tex = gl.createTexture();
+                    textures[textureId] = tex;
+                }
+
+                gl.bindTexture(gl.TEXTURE_2D, tex);
+                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, rgbaData);
+                
+                // tex filters
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                
+                console.log(`[WebGL] Текстура ID ${textureId} (${width}x${height}) создана/обновлена.`);
+            }
+
+            // packet type 6: remove texture from videomemory
+            else if (packetType === 7) {
+                const textureId = view.getUint32(4, true);
+                const tex = textures[textureId];
+                
+                if (tex) {
+                    gl.deleteTexture(tex); // free from GL memory
+                    delete textures[textureId]; // delete from textures array
+                    console.log(`[WebGL] Texture ID ${textureId} successfully removed`);
+                }
+            }
+        };
+		
+		// Fopen dialog handlers
+        fileSelector.addEventListener("change", (event) => {
+            const file = event.target.files[0];
+            if (!file || socket.readyState !== WebSocket.OPEN) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const fileBuffer = e.target.result;
+                const nameEncoder = new TextEncoder();
+                const nameBytes = nameEncoder.encode(file.name);
+                
+                // packet type 5 header: [Type: 5 (4 bytes)] [Name length (4 bytes)]
+                const header = new ArrayBuffer(8);
+                const headerView = new DataView(header);
+                headerView.setUint32(0, 5, true); 
+                headerView.setUint32(4, nameBytes.length, true); 
+
+                const combinedPacket = new Uint8Array(8 + nameBytes.length + fileBuffer.byteLength);
+                combinedPacket.set(new Uint8Array(header), 0);
+                combinedPacket.set(nameBytes, 8);
+                combinedPacket.set(new Uint8Array(fileBuffer), 8 + nameBytes.length);
+
+                socket.send(combinedPacket);
+                console.log(`[Client] Uploading: ${file.name}`);
+                
+                // reset input value
+                fileSelector.value = ""; 
+            };
+            reader.readAsArrayBuffer(file);
+        });
+    </script>
+</body>
+</html>

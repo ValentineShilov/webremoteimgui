@@ -1,0 +1,55 @@
+# Cache and temporary directories
+.fc_cache/
+.vs/
+.vscode/
+build/
+releases/
+
+# Generated build files & commands
+#buildcmd.txt
+CMakeSettings.json
+CMakeUserPresets.json
+
+# C++ binaries and temporary object files
+*.exe
+*.dll
+*.so
+*.dylib
+*.out
+*.app
+*.o
+*.obj
+*.pdb
+*.idb
+
+# Python cache & virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# Sensitive or private data
+classified/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+[Dd]esktop.ini
+desktop.ini
+
+# NextCloud sync & conflict files
+.tech.nc~
+*.nextcloud
+~*
+._*
+.com.nextcloud*
+*~conflicted*
+
+# NextCloud client database and logs
+.nextcloudsync.log
+.sync_*.db
+.sync_*.db-wal
+.sync_*.db-shm
