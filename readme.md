@@ -81,3 +81,8 @@ void ClientSession::DrawGUI(void* ws) {
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ```
+## Screenshots:
+Example login window with custom styles
+<img width="1299" height="1032" alt="remote_imgui_example1" src="https://github.com/user-attachments/assets/753f9047-029d-4a00-8613-6413dcbe9a05" />
+Example window with custom texture:
+<img width="1299" height="1032" alt="example_image2" src="https://github.com/user-attachments/assets/bf0d9bc9-5e54-4671-865d-f9ecdee2fd90" />
