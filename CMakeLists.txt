@@ -3,10 +3,11 @@ project(RemoteImGuiServer VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# FetchContent cache configuration
 set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/.fc_cache" CACHE PATH "" FORCE)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON CACHE BOOL "" FORCE) 
 
-# Include FetchContent module
 include(FetchContent)
 
 # Download nlohmann_json
@@ -33,29 +34,40 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(imgui)
 
-# Retrieve the source path of the downloaded ImGui repository
-FetchContent_GetProperties(imgui SOURCE_DIR IMGUI_DIR)
+# Download ImPlot
+FetchContent_Declare(
+    implot
+    GIT_REPOSITORY https://github.com/epezent/implot.git
+    GIT_TAG        v1.0
+)
+FetchContent_MakeAvailable(implot)
 
-# Create a standalone static library for ImGui
-add_library(imgui STATIC
-    ${IMGUI_DIR}/imgui.cpp
-    ${IMGUI_DIR}/imgui_draw.cpp
-    ${IMGUI_DIR}/imgui_widgets.cpp
-    ${IMGUI_DIR}/imgui_tables.cpp
-    ${IMGUI_DIR}/imgui_demo.cpp
-    ${IMGUI_DIR}/misc/cpp/imgui_stdlib.cpp
+
+# Create a single static library for UI and plotting
+add_library(imgui_implot STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_demo.cpp
+    ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
+    
+    ${implot_SOURCE_DIR}/implot.cpp
+    ${implot_SOURCE_DIR}/implot_items.cpp
+    ${implot_SOURCE_DIR}/implot_demo.cpp
 )
 
-# Bind include directories directly to the target 'imgui' library
-target_include_directories(imgui PUBLIC 
-    ${IMGUI_DIR}
-    ${IMGUI_DIR}/misc/cpp
+# Set up include directories for the UI library (Target name fixed to imgui_implot)
+target_include_directories(imgui_implot PUBLIC 
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/misc/cpp
+    ${implot_SOURCE_DIR}
 )
+
 
 # Main App setup
 find_package(Threads REQUIRED)
 
-# Only your own server logic files go here
 set(SOURCES
     server.cpp
     client_session.cpp
@@ -73,12 +85,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_libraries(${PROJECT_NAME} PRIVATE
     nlohmann_json::nlohmann_json
     ixwebsocket
-    imgui
+    imgui_implot
     Threads::Threads
 )
 
+# Platform-specific system libraries
 if(WIN32)
-    # Windows system networking libraries
     target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32 mswsock)
     target_compile_definitions(${PROJECT_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
 elseif(CMAKE_SYSTEM_NAME MATCHES "Linux")

@@ -1,4 +1,5 @@
 ﻿#include <imgui.h>
+#include <implot.h>
 #include <filesystem>
 
 
@@ -22,6 +23,7 @@ public:
 class ClientSession {
 public:
     ImGuiContext* imguiContext = nullptr;      // Private use ImGui context
+    ImPlotContext *implotContext = nullptr;
     GlobalState *global_state = nullptr;
     std::vector<uint8_t> prevFramePayload;    // Prevoius frame for delta
     std::vector<uint8_t> fontTexturePayload;  // font texture payload

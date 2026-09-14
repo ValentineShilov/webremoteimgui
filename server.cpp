@@ -230,6 +230,7 @@ bool ImServer::init_websocket_server() {
 
                 IMGUI_CHECKVERSION();
                 ImGuiContext* ctx = ImGui::CreateContext();
+                ImPlotContext* plctx = ImPlot::CreateContext();
                 ImGui::SetCurrentContext(ctx);
                 
                 auto headers = msg->openInfo.headers;
@@ -262,6 +263,7 @@ bool ImServer::init_websocket_server() {
                 session->session_id = session_id;
                 
                 session->imguiContext = ctx;
+                session->implotContext = plctx;
 
                 session->init_fonts_callback();
 
@@ -308,6 +310,7 @@ bool ImServer::init_websocket_server() {
                 auto it = g_sessions.find(&webSocket);
                 if (it != g_sessions.end()) {
                     it->second->close_callback();
+                    ImPlot::DestroyContext(it->second->implotContext);
                     ImGui::DestroyContext(it->second->imguiContext);
                     std::string saved_id = it->second->session_id;
                     g_saved_sessions[saved_id] = std::move(it->second);

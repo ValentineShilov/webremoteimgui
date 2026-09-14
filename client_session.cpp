@@ -12,7 +12,7 @@ void ClientSession::DrawGUI(void* ws) {
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImVec2 center = ImGui::GetMainViewport()->GetCenter();
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSize({ viewport->Size.x * 0.8f, viewport->Size.y * 0.8f });
+        ImGui::SetNextWindowSize({ viewport->Size.x * 0.8f, viewport->Size.y * 0.8f }, ImGuiCond_Appearing);
         ImGuiWindowFlags flags = ImGuiItemFlags_None;
          /*  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
@@ -41,6 +41,15 @@ void ClientSession::DrawGUI(void* ws) {
         ImGui::TextUnformatted("Remote texture: ");
         ImGui::Image((ImTextureID)(uintptr_t)2, { 64 , 64 });
         ImGui::InputText("Your Private Text", textBuffer, IM_ARRAYSIZE(textBuffer));
+        if (ImPlot::BeginPlot("Line and Scatter Plot", ImVec2(-1, 300))) {
+            float x_data[10] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+            float y_data1[10] = { 0, 1, 4, 9, 16, 25, 36, 49, 64, 81 };
+            float y_data2[10] = { 0, 2, 4, 6, 8, 10, 12, 14, 16, 18 }; 
+            ImPlot::SetupAxes("X Axis Label", "Y Axis Label");
+            ImPlot::PlotLine("y = x^2", x_data, y_data1, 10);
+            ImPlot::PlotScatter("y = 2x", x_data, y_data2, 10);
+            ImPlot::EndPlot();
+        }
         ImGui::End();
     }
     else
