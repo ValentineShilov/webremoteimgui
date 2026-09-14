@@ -457,9 +457,14 @@ bool ImServer::run_server()
                     append_fast(draw_data->CmdLists[n]->VtxBuffer.Data, size);
                 }
                 // Copy the indices (the size will be automatically adjusted to uint16_t or uint32_t).
+                uint32_t current_vtx_offset = 0;
                 for (int n = 0; n < draw_data->CmdListsCount; n++) {
-                    size_t size = (size_t) (draw_data->CmdLists[n]->IdxBuffer.Size) * idx_type_size;
-                    append_fast(draw_data->CmdLists[n]->IdxBuffer.Data, size);
+                    const ImDrawList* cmd_list = draw_data->CmdLists[n];
+                    for (int m = 0; m < cmd_list->IdxBuffer.Size; ++m) {
+                        ImDrawIdx rebased_idx = (ImDrawIdx)(current_vtx_offset + cmd_list->IdxBuffer.Data[m] );
+                        append_fast(&rebased_idx, sizeof(ImDrawIdx));
+                    }
+                    current_vtx_offset += (uint32_t)(cmd_list->VtxBuffer.Size);
                 }
                 // Copy the rendering commands.
                 for (int n = 0; n < draw_data->CmdListsCount; n++) {
