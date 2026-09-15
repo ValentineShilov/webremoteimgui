@@ -271,6 +271,9 @@ bool ImServer::init_websocket_server() {
                 io.IniFilename = nullptr;
                 io.IniFilename = nullptr;
 
+                io.SetClipboardTextFn = set_clipboard_text_from_server;
+                io.ClipboardUserData = session.get();
+
                 unsigned char* pixels; int width, height;
                 io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 
@@ -379,8 +382,9 @@ bool ImServer::run_server()
 
             bool setCookie = false;
             std::string cookie_to_set;
-  
-
+            
+            bool triggerCopy = false;
+            std::string clipboard_to_send;
             // Local mutex scope STRICTLY for working with ImGui and the session.
             {
                 std::lock_guard<std::recursive_mutex> lock(g_sessions_mutex);
@@ -411,6 +415,11 @@ bool ImServer::run_server()
                 cookie_to_set = session->setCookie;
                 session->setCookie = "";
                 session->triggerSetCookie = false;
+
+                triggerCopy = session->triggerCopy;
+                clipboard_to_send = session->clipboard;
+                session->clipboard = "";
+                session->triggerCopy = false;
 
                 // Gathering ImGui geometry into a buffer
                 ImDrawData* draw_data = ImGui::GetDrawData();
@@ -479,12 +488,17 @@ bool ImServer::run_server()
 
             // Processing of open_url command outside the mutex
             if (sendUrl) {
-                json cmd = { { "type", "open_url" },{ "url", urlToTransmit } };
+                json cmd = { { "type", "open_url" }, { "url", urlToTransmit } };
                 ws->sendText(cmd.dump());
             }
 
             if (setCookie) {
-                json cmd = { { "type", "set_cookie" },{ "cookie", cookie_to_set } };
+                json cmd = { { "type", "set_cookie" }, { "cookie", cookie_to_set } };
+                ws->sendText(cmd.dump());
+            }
+
+            if (triggerCopy) {
+                json cmd = { { "type", "clipboard_copy" }, { "text", clipboard_to_send } };
                 ws->sendText(cmd.dump());
             }
 
@@ -579,6 +593,22 @@ std::vector<uint8_t> ImServer::base64_decode(const std::string& in) {
     }
     return out;
 }
+
+void ImServer::set_clipboard_text_from_server(void* user_data, const char* text) {
+    ClientSession* session = (ClientSession*) user_data;
+    if (session && text) {
+        ImGuiContext* prevContext = ImGui::GetCurrentContext();
+        if (prevContext != session->imguiContext) {
+            ImGui::SetCurrentContext(session->imguiContext);
+        }
+        session->clipboard = text; 
+        session->triggerCopy = true;
+        if (prevContext != session->imguiContext) {
+            ImGui::SetCurrentContext(prevContext);
+        }
+    }
+}
+
 
 std::vector<uint8_t> ImServer::compress_delta(const std::vector<uint8_t>& current, const std::vector<uint8_t>& previous) {
     std::vector<uint8_t> delta;

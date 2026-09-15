@@ -88,6 +88,7 @@ private:
     const size_t MAX_UPLOAD_SIZE = 512 * 1024 * 1024;   // max file upload size - should fit in RAM
     static std::string_view strip_trailing_slash(std::string_view path);
     static bool match_path(std::string_view request_path, std::string_view route_path);
+    static void set_clipboard_text_from_server(void *user_data, const char* text);
 
 };
 

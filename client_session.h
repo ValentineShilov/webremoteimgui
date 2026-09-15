@@ -39,6 +39,8 @@ public:
     bool triggerFileUploadDialog = false;
     bool triggerSetCookie = false;
     std::string setCookie;
+    bool triggerCopy = false;
+    std::string clipboard;
 
     // Constructor
     ClientSession(GlobalState* global_state_a) : global_state(global_state_a) { };
