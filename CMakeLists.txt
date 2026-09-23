@@ -15,6 +15,33 @@ FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 FetchContent_MakeAvailable(json)
 
+# Download ZLIB
+FetchContent_Declare(
+    zlib
+    GIT_REPOSITORY https://github.com/madler/zlib.git
+    GIT_TAG        v1.3.1
+)
+set(ZLIB_BUILD_EXAMPLES OFF CACHE INTERNAL "")
+FetchContent_MakeAvailable(zlib)
+FetchContent_GetProperties(zlib)
+
+# Set the exact variables that FindZLIB.cmake checks for
+set(ZLIB_INCLUDE_DIR "${zlib_SOURCE_DIR};${zlib_BINARY_DIR}" CACHE INTERNAL "")
+set(ZLIB_INCLUDE_DIRS "${ZLIB_INCLUDE_DIR}" CACHE INTERNAL "")
+
+if(TARGET zlibstatic)
+    set(ZLIB_LIBRARY zlibstatic CACHE INTERNAL "")
+    set(ZLIB_LIBRARIES zlibstatic CACHE INTERNAL "")
+    set(ZLIB_FOUND TRUE CACHE INTERNAL "")
+    
+    # Also create the alias target just in case
+    if(NOT TARGET ZLIB::ZLIB)
+        add_library(ZLIB::ZLIB ALIAS zlibstatic)
+    endif()
+endif()
+
+set(CMAKE_SKIP_INSTALL_RULES ON)
+
 # Download IXWebSocket
 FetchContent_Declare(
     ixwebsocket
@@ -23,7 +50,7 @@ FetchContent_Declare(
 )
 set(USE_TLS OFF CACHE INTERNAL "")
 set(BUILD_HTTPD ON CACHE INTERNAL "")
-set(USE_ZLIB OFF CACHE INTERNAL "")
+set(USE_ZLIB ON CACHE INTERNAL "")
 FetchContent_MakeAvailable(ixwebsocket)
 
 # Download Dear ImGui

@@ -92,5 +92,6 @@ private:
     char textBuffer[256] = "";
     bool logged_in = false;
     std::string password;
+    bool show_demo_window = false;
     
 };

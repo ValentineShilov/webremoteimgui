@@ -50,13 +50,16 @@ void ClientSession::DrawGUI(void* ws) {
             ImPlot::PlotScatter("y = 2x", x_data, y_data2, 10);
             ImPlot::EndPlot();
         }
+
+        ImGui::Checkbox("Show demo window", &show_demo_window); 
         ImGui::End();
+        if (show_demo_window) ImGui::ShowDemoWindow();
     }
     else
     {
         ImVec2 center = ImGui::GetMainViewport()->GetCenter();
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSize(ImVec2(300.0f, 200.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(400.0f, 200.0f), ImGuiCond_FirstUseEver);
         ImGui::Begin("LoginWindiw");
         ImGui::TextUnformatted("Example, password is 12345");
         ImGui::AlignTextToFramePadding();
