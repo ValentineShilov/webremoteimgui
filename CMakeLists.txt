@@ -46,7 +46,7 @@ set(CMAKE_SKIP_INSTALL_RULES ON)
 FetchContent_Declare(
     ixwebsocket
     GIT_REPOSITORY https://github.com/machinezone/IXWebSocket.git
-    GIT_TAG        v11.4.5 
+    GIT_TAG        v12.0.1 
 )
 set(USE_TLS OFF CACHE INTERNAL "")
 set(BUILD_HTTPD ON CACHE INTERNAL "")
